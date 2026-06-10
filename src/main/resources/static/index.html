@@ -38,21 +38,27 @@
       gap: 10px;
       margin: 0 0 18px;
     }
-    .message-form {
-      display: flex;
-      gap: 10px;
+    .protocol-panel {
       margin: 0 0 18px;
     }
-    input {
-      flex: 1;
-      min-width: 220px;
-      height: 36px;
+    .protocol-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 10px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 120px;
       box-sizing: border-box;
-      padding: 0 12px;
+      padding: 12px;
       border: 1px solid #9ca3af;
       border-radius: 6px;
       background: #fff;
       color: #111827;
+      font-family: Consolas, monospace;
+      line-height: 1.5;
+      resize: vertical;
     }
     button {
       height: 36px;
@@ -91,9 +97,13 @@
       <button id="disconnectBtn" type="button" disabled>断开</button>
       <button id="clearBtn" type="button">清空日志</button>
     </div>
-    <div class="message-form">
-      <input id="messageInput" type="text" placeholder="输入一条消息，通过 POST 发给服务端" disabled>
-      <button id="sendBtn" type="button" disabled>发送消息</button>
+    <div class="protocol-panel">
+      <div class="protocol-actions">
+        <button id="initializeBtn" type="button" disabled>生成 initialize</button>
+        <button id="toolsListBtn" type="button" disabled>生成 tools/list</button>
+        <button id="sendBtn" type="button" disabled>POST 请求</button>
+      </div>
+      <textarea id="requestBody" disabled></textarea>
     </div>
     <pre id="log"></pre>
   </main>
@@ -105,11 +115,14 @@
     const connectButton = document.getElementById("connectBtn");
     const disconnectButton = document.getElementById("disconnectBtn");
     const clearButton = document.getElementById("clearBtn");
-    const messageInput = document.getElementById("messageInput");
+    const initializeButton = document.getElementById("initializeBtn");
+    const toolsListButton = document.getElementById("toolsListBtn");
     const sendButton = document.getElementById("sendBtn");
+    const requestBody = document.getElementById("requestBody");
     let eventSource = null;
     let sessionId = null;
     let messageEndpoint = null;
+    let requestId = 1;
 
     function appendLog(text) {
       logElement.textContent += text + "\n";
@@ -119,14 +132,28 @@
     function setConnected(connected) {
       connectButton.disabled = connected;
       disconnectButton.disabled = !connected;
-      messageInput.disabled = !connected;
+      initializeButton.disabled = !connected;
+      toolsListButton.disabled = !connected;
       sendButton.disabled = !connected;
+      requestBody.disabled = !connected;
     }
 
     function resetSession() {
       sessionId = null;
       messageEndpoint = null;
       sessionIdElement.textContent = "无";
+      requestBody.value = "";
+    }
+
+    function fillRequest(method, params = {}) {
+      const request = {
+        jsonrpc: "2.0",
+        id: String(requestId++),
+        method,
+        params
+      };
+
+      requestBody.value = JSON.stringify(request, null, 2);
     }
 
     function connectSse() {
@@ -153,6 +180,7 @@
         messageEndpoint = data.messageEndpoint;
         sessionIdElement.textContent = sessionId;
         appendLog("[session] " + event.data);
+        fillRequest("initialize");
       });
 
       eventSource.addEventListener("message", (event) => {
@@ -179,10 +207,10 @@
       appendLog("[close] 浏览器主动关闭 SSE 连接");
     }
 
-    async function sendMessage() {
-      const text = messageInput.value.trim();
-      if (!text) {
-        appendLog("[warn] 请输入消息内容");
+    async function postJsonRpc() {
+      const bodyText = requestBody.value.trim();
+      if (!bodyText) {
+        appendLog("[warn] 请先生成或输入 JSON-RPC 请求体");
         return;
       }
 
@@ -191,29 +219,33 @@
         return;
       }
 
-      appendLog("[post] POST " + messageEndpoint + " body=" + JSON.stringify({ text }));
+      let body;
+      try {
+        body = JSON.parse(bodyText);
+      } catch (error) {
+        appendLog("[warn] JSON 格式不正确：" + error.message);
+        return;
+      }
+
+      appendLog("[post] POST " + messageEndpoint + " body=" + JSON.stringify(body));
 
       const response = await fetch(messageEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ text })
+        body: JSON.stringify(body)
       });
 
       const result = await response.json();
       appendLog("[post-result] " + JSON.stringify(result));
-      messageInput.value = "";
     }
 
     connectButton.addEventListener("click", connectSse);
     disconnectButton.addEventListener("click", disconnectSse);
-    sendButton.addEventListener("click", sendMessage);
-    messageInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        sendMessage();
-      }
-    });
+    initializeButton.addEventListener("click", () => fillRequest("initialize"));
+    toolsListButton.addEventListener("click", () => fillRequest("tools/list"));
+    sendButton.addEventListener("click", postJsonRpc);
     clearButton.addEventListener("click", () => {
       logElement.textContent = "";
     });

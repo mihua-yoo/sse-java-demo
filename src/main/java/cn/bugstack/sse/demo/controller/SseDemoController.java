@@ -10,6 +10,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -42,18 +46,18 @@ public class SseDemoController {
     }
 
     @PostMapping(value = "/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public MessageResponse messages(@RequestParam String sessionId, @RequestBody SendMessageRequest request) throws IOException {
+    public MessageResponse messages(@RequestParam String sessionId, @RequestBody JsonRpcRequest request) throws IOException {
         SseEmitter emitter = emitters.get(sessionId);
         if (emitter == null) {
             return new MessageResponse(false, "session not found or closed: " + sessionId);
         }
 
-        // 这里模拟“客户端通过普通 HTTP 发消息，服务端再通过 SSE 把结果推回对应客户端”。
+        // 这里模拟“客户端 POST JSON-RPC 请求，服务端通过 SSE 异步推回 JSON-RPC 响应”。
         emitter.send(SseEmitter.event()
                 .name("message")
-                .data(new EventMessage("reply", "服务端收到消息：" + request.getText(), LocalDateTime.now().toString())));
+                .data(handleJsonRpcRequest(request)));
 
-        return new MessageResponse(true, "message sent by SSE");
+        return new MessageResponse(true, "JSON-RPC response sent by SSE");
     }
 
     private void sendEvents(String sessionId, SseEmitter emitter) {
@@ -66,8 +70,7 @@ public class SseDemoController {
             for (int count = 1; count <= 100; count++) {
                 EventMessage message = new EventMessage("tick", "第 " + count + " 次服务端定时推送", LocalDateTime.now().toString());
 
-                // name("message") 对应前端 addEventListener("message", ...)。
-                // data(message) 会由 Spring 自动序列化为 JSON。
+                // message 事件既可以承载普通通知，也可以承载 JSON-RPC 响应；SSE 只负责传输。
                 emitter.send(SseEmitter.event()
                         .name("message")
                         .data(message));
@@ -89,6 +92,32 @@ public class SseDemoController {
     private void removeEmitter(String sessionId, String reason) {
         emitters.remove(sessionId);
         System.out.println("SSE session removed. sessionId=" + sessionId + ", reason=" + reason);
+    }
+
+    private JsonRpcResponse handleJsonRpcRequest(JsonRpcRequest request) {
+        if ("initialize".equals(request.getMethod())) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("serverName", "sse-learning-demo");
+            result.put("protocolVersion", "demo-2026-06-10");
+            result.put("message", "初始化成功，当前连接可以继续请求 tools/list");
+            return JsonRpcResponse.success(request.getId(), result);
+        }
+
+        if ("tools/list".equals(request.getMethod())) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("tools", createDemoTools());
+            return JsonRpcResponse.success(request.getId(), result);
+        }
+
+        return JsonRpcResponse.error(request.getId(), -32601, "method not found: " + request.getMethod());
+    }
+
+    private List<ToolDefinition> createDemoTools() {
+        List<ToolDefinition> tools = new ArrayList<>();
+        tools.add(new ToolDefinition("time.now", "获取当前服务器时间"));
+        tools.add(new ToolDefinition("echo", "原样返回输入内容"));
+        tools.add(new ToolDefinition("random.number", "生成一个随机数字"));
+        return tools;
     }
 
     public static class SessionMessage {
@@ -135,16 +164,110 @@ public class SseDemoController {
         }
     }
 
-    public static class SendMessageRequest {
+    public static class JsonRpcRequest {
 
-        private String text;
+        private String id;
+        private String method;
+        private Map<String, Object> params;
 
-        public String getText() {
-            return text;
+        public String getId() {
+            return id;
         }
 
-        public void setText(String text) {
-            this.text = text;
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getMethod() {
+            return method;
+        }
+
+        public void setMethod(String method) {
+            this.method = method;
+        }
+
+        public Map<String, Object> getParams() {
+            return params;
+        }
+
+        public void setParams(Map<String, Object> params) {
+            this.params = params;
+        }
+    }
+
+    public static class JsonRpcResponse {
+
+        private final String jsonrpc = "2.0";
+        private final String id;
+        private final Object result;
+        private final JsonRpcError error;
+
+        private JsonRpcResponse(String id, Object result, JsonRpcError error) {
+            this.id = id;
+            this.result = result;
+            this.error = error;
+        }
+
+        public static JsonRpcResponse success(String id, Object result) {
+            return new JsonRpcResponse(id, result, null);
+        }
+
+        public static JsonRpcResponse error(String id, int code, String message) {
+            return new JsonRpcResponse(id, null, new JsonRpcError(code, message));
+        }
+
+        public String getJsonrpc() {
+            return jsonrpc;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public Object getResult() {
+            return result;
+        }
+
+        public JsonRpcError getError() {
+            return error;
+        }
+    }
+
+    public static class JsonRpcError {
+
+        private final int code;
+        private final String message;
+
+        public JsonRpcError(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        public int getCode() {
+            return code;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    public static class ToolDefinition {
+
+        private final String name;
+        private final String description;
+
+        public ToolDefinition(String name, String description) {
+            this.name = name;
+            this.description = description;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getDescription() {
+            return description;
         }
     }
 

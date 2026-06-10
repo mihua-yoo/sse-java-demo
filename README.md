@@ -55,8 +55,8 @@ http://localhost:8089
 
 - 页面加载后不会自动连接，需要点击“连接”按钮才会创建 `EventSource("/events")`。
 - 连接建立后，服务端会先推送一条 `session` 事件，里面包含当前连接的 `sessionId`。
-- 页面拿到 `sessionId` 后，可以通过 `POST /messages?sessionId=xxx` 给服务端发消息。
-- 服务端收到 POST 后，会通过对应的 SSE 连接把结果推回页面。
+- 页面拿到 `sessionId` 后，可以通过 `POST /messages?sessionId=xxx` 给服务端发 JSON-RPC 风格请求。
+- 服务端收到 POST 后，会通过对应的 SSE 连接把 JSON-RPC 风格响应推回页面。
 - 点击“断开”按钮会调用 `eventSource.close()`，浏览器会主动关闭 SSE 连接。
 - `SseDemoController` 返回 `SseEmitter`，Spring Boot 会保持这条 HTTP 响应不立刻关闭。
 - 服务端每 2 秒推送一条名为 `message` 的事件。
@@ -121,3 +121,49 @@ GET /sse                         建立 SSE 连接，拿到 sessionId
 POST /messages?sessionId=xxx      客户端发送请求
 SSE message event                 服务端异步推送响应
 ```
+
+阶段 4 的重点是理解“传输层”和“协议内容”的区别：
+
+```text
+SSE 负责把服务端消息推给浏览器
+POST 负责把浏览器请求发给服务端
+JSON-RPC 风格 JSON 负责表达具体要做什么
+```
+
+现在页面会生成这样的请求：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "initialize",
+  "params": {}
+}
+```
+
+服务端会通过 SSE `message` 事件推回：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "result": {
+    "serverName": "sse-learning-demo",
+    "protocolVersion": "demo-2026-06-10",
+    "message": "初始化成功，当前连接可以继续请求 tools/list"
+  }
+}
+```
+
+阶段 5 的重点是模拟工具列表：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "2",
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+服务端会返回 `time.now`、`echo`、`random.number` 三个模拟工具。它们现在只是工具定义，下一阶段再实现真正的 `tools/call`。
