@@ -53,7 +53,8 @@ http://localhost:8089
 
 ## 你会看到什么
 
-- 页面加载后会通过 `EventSource("/events")` 建立 SSE 连接。
+- 页面加载后不会自动连接，需要点击“连接”按钮才会创建 `EventSource("/events")`。
+- 点击“断开”按钮会调用 `eventSource.close()`，浏览器会主动关闭 SSE 连接。
 - `SseDemoController` 返回 `SseEmitter`，Spring Boot 会保持这条 HTTP 响应不立刻关闭。
 - 服务端每 2 秒推送一条名为 `message` 的事件。
 - 页面会把收到的事件追加到日志区域。
@@ -86,4 +87,11 @@ emitter.send(SseEmitter.event()
 eventSource.addEventListener("message", (event) => {
   appendLog("[message] " + event.data);
 });
+```
+
+阶段 1 的重点是观察连接生命周期：
+
+```text
+点击连接 -> 浏览器创建 EventSource -> 服务端创建 SseEmitter -> 持续推送消息
+点击断开 -> 浏览器 close EventSource -> 服务端感知连接结束或写入失败
 ```

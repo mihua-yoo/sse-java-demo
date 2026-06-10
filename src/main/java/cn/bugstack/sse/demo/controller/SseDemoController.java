@@ -20,6 +20,10 @@ public class SseDemoController {
         // SseEmitter 是 Spring MVC 对 SSE 长连接的封装；timeout=0L 表示不主动超时。
         SseEmitter emitter = new SseEmitter(0L);
 
+        emitter.onCompletion(() -> System.out.println("SSE connection completed."));
+        emitter.onTimeout(() -> System.out.println("SSE connection timeout."));
+        emitter.onError(error -> System.out.println("SSE connection error: " + error.getMessage()));
+
         // Controller 方法要尽快返回 emitter，真正的持续推送放到独立线程里执行。
         executorService.execute(() -> sendEvents(emitter));
 

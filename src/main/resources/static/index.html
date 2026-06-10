@@ -27,6 +27,25 @@
       border-radius: 6px;
       background: #fff;
     }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin: 0 0 18px;
+    }
+    button {
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid #9ca3af;
+      border-radius: 6px;
+      background: #fff;
+      color: #111827;
+      cursor: pointer;
+    }
+    button:disabled {
+      color: #9ca3af;
+      cursor: not-allowed;
+      background: #f3f4f6;
+    }
     #log {
       min-height: 360px;
       padding: 14px;
@@ -43,33 +62,78 @@
 <body>
   <main>
     <h1>SSE Learning Demo</h1>
-    <div class="status">连接状态：<strong id="status">正在连接...</strong></div>
+    <div class="status">连接状态：<strong id="status">未连接</strong></div>
+    <div class="toolbar">
+      <button id="connectBtn" type="button">连接</button>
+      <button id="disconnectBtn" type="button" disabled>断开</button>
+      <button id="clearBtn" type="button">清空日志</button>
+    </div>
     <pre id="log"></pre>
   </main>
 
   <script>
     const statusElement = document.getElementById("status");
     const logElement = document.getElementById("log");
-    const eventSource = new EventSource("/events");
+    const connectButton = document.getElementById("connectBtn");
+    const disconnectButton = document.getElementById("disconnectBtn");
+    const clearButton = document.getElementById("clearBtn");
+    let eventSource = null;
 
     function appendLog(text) {
       logElement.textContent += text + "\n";
       logElement.scrollTop = logElement.scrollHeight;
     }
 
-    eventSource.onopen = () => {
-      statusElement.textContent = "已连接";
-      appendLog("[open] SSE 连接已建立");
-    };
+    function setConnected(connected) {
+      connectButton.disabled = connected;
+      disconnectButton.disabled = !connected;
+    }
 
-    eventSource.addEventListener("message", (event) => {
-      appendLog("[message] " + event.data);
+    function connectSse() {
+      if (eventSource) {
+        appendLog("[info] 当前已经有 SSE 连接");
+        return;
+      }
+
+      statusElement.textContent = "正在连接...";
+      appendLog("[connect] 创建 EventSource，开始请求 /events");
+
+      eventSource = new EventSource("/events");
+
+      eventSource.onopen = () => {
+        setConnected(true);
+        statusElement.textContent = "已连接";
+        appendLog("[open] SSE 连接已建立");
+      };
+
+      eventSource.addEventListener("message", (event) => {
+        appendLog("[message] " + event.data);
+      });
+
+      eventSource.onerror = () => {
+        statusElement.textContent = "连接异常或正在重连";
+        appendLog("[error] 连接异常，浏览器可能会自动尝试重连");
+      };
+    }
+
+    function disconnectSse() {
+      if (!eventSource) {
+        appendLog("[info] 当前没有 SSE 连接");
+        return;
+      }
+
+      eventSource.close();
+      eventSource = null;
+      setConnected(false);
+      statusElement.textContent = "已断开";
+      appendLog("[close] 浏览器主动关闭 SSE 连接");
+    }
+
+    connectButton.addEventListener("click", connectSse);
+    disconnectButton.addEventListener("click", disconnectSse);
+    clearButton.addEventListener("click", () => {
+      logElement.textContent = "";
     });
-
-    eventSource.onerror = () => {
-      statusElement.textContent = "连接异常或正在重连";
-      appendLog("[error] 连接异常，浏览器会自动尝试重连");
-    };
   </script>
 </body>
 </html>
