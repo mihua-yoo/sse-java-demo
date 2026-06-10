@@ -27,10 +27,32 @@
       border-radius: 6px;
       background: #fff;
     }
+    .session {
+      margin: 0 0 18px;
+      font-family: Consolas, monospace;
+      color: #4b5563;
+    }
     .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 18px;
+    }
+    .message-form {
       display: flex;
       gap: 10px;
       margin: 0 0 18px;
+    }
+    input {
+      flex: 1;
+      min-width: 220px;
+      height: 36px;
+      box-sizing: border-box;
+      padding: 0 12px;
+      border: 1px solid #9ca3af;
+      border-radius: 6px;
+      background: #fff;
+      color: #111827;
     }
     button {
       height: 36px;
@@ -63,21 +85,31 @@
   <main>
     <h1>SSE Learning Demo</h1>
     <div class="status">连接状态：<strong id="status">未连接</strong></div>
+    <div class="session">sessionId：<span id="sessionId">无</span></div>
     <div class="toolbar">
       <button id="connectBtn" type="button">连接</button>
       <button id="disconnectBtn" type="button" disabled>断开</button>
       <button id="clearBtn" type="button">清空日志</button>
+    </div>
+    <div class="message-form">
+      <input id="messageInput" type="text" placeholder="输入一条消息，通过 POST 发给服务端" disabled>
+      <button id="sendBtn" type="button" disabled>发送消息</button>
     </div>
     <pre id="log"></pre>
   </main>
 
   <script>
     const statusElement = document.getElementById("status");
+    const sessionIdElement = document.getElementById("sessionId");
     const logElement = document.getElementById("log");
     const connectButton = document.getElementById("connectBtn");
     const disconnectButton = document.getElementById("disconnectBtn");
     const clearButton = document.getElementById("clearBtn");
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendBtn");
     let eventSource = null;
+    let sessionId = null;
+    let messageEndpoint = null;
 
     function appendLog(text) {
       logElement.textContent += text + "\n";
@@ -87,6 +119,14 @@
     function setConnected(connected) {
       connectButton.disabled = connected;
       disconnectButton.disabled = !connected;
+      messageInput.disabled = !connected;
+      sendButton.disabled = !connected;
+    }
+
+    function resetSession() {
+      sessionId = null;
+      messageEndpoint = null;
+      sessionIdElement.textContent = "无";
     }
 
     function connectSse() {
@@ -95,6 +135,7 @@
         return;
       }
 
+      resetSession();
       statusElement.textContent = "正在连接...";
       appendLog("[connect] 创建 EventSource，开始请求 /events");
 
@@ -105,6 +146,14 @@
         statusElement.textContent = "已连接";
         appendLog("[open] SSE 连接已建立");
       };
+
+      eventSource.addEventListener("session", (event) => {
+        const data = JSON.parse(event.data);
+        sessionId = data.sessionId;
+        messageEndpoint = data.messageEndpoint;
+        sessionIdElement.textContent = sessionId;
+        appendLog("[session] " + event.data);
+      });
 
       eventSource.addEventListener("message", (event) => {
         appendLog("[message] " + event.data);
@@ -124,13 +173,47 @@
 
       eventSource.close();
       eventSource = null;
+      resetSession();
       setConnected(false);
       statusElement.textContent = "已断开";
       appendLog("[close] 浏览器主动关闭 SSE 连接");
     }
 
+    async function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text) {
+        appendLog("[warn] 请输入消息内容");
+        return;
+      }
+
+      if (!messageEndpoint) {
+        appendLog("[warn] 当前还没有 sessionId，不能发送消息");
+        return;
+      }
+
+      appendLog("[post] POST " + messageEndpoint + " body=" + JSON.stringify({ text }));
+
+      const response = await fetch(messageEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text })
+      });
+
+      const result = await response.json();
+      appendLog("[post-result] " + JSON.stringify(result));
+      messageInput.value = "";
+    }
+
     connectButton.addEventListener("click", connectSse);
     disconnectButton.addEventListener("click", disconnectSse);
+    sendButton.addEventListener("click", sendMessage);
+    messageInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        sendMessage();
+      }
+    });
     clearButton.addEventListener("click", () => {
       logElement.textContent = "";
     });

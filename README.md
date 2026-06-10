@@ -54,6 +54,9 @@ http://localhost:8089
 ## 你会看到什么
 
 - 页面加载后不会自动连接，需要点击“连接”按钮才会创建 `EventSource("/events")`。
+- 连接建立后，服务端会先推送一条 `session` 事件，里面包含当前连接的 `sessionId`。
+- 页面拿到 `sessionId` 后，可以通过 `POST /messages?sessionId=xxx` 给服务端发消息。
+- 服务端收到 POST 后，会通过对应的 SSE 连接把结果推回页面。
 - 点击“断开”按钮会调用 `eventSource.close()`，浏览器会主动关闭 SSE 连接。
 - `SseDemoController` 返回 `SseEmitter`，Spring Boot 会保持这条 HTTP 响应不立刻关闭。
 - 服务端每 2 秒推送一条名为 `message` 的事件。
@@ -94,4 +97,27 @@ eventSource.addEventListener("message", (event) => {
 ```text
 点击连接 -> 浏览器创建 EventSource -> 服务端创建 SseEmitter -> 持续推送消息
 点击断开 -> 浏览器 close EventSource -> 服务端感知连接结束或写入失败
+```
+
+阶段 2 的重点是理解 session：
+
+```text
+点击连接 -> GET /events -> 服务端创建 sessionId -> 保存 sessionId 和 SseEmitter 的关系
+服务端推送 session 事件 -> 浏览器保存 sessionId
+```
+
+阶段 3 的重点是理解 SSE + 普通 HTTP 如何配合：
+
+```text
+浏览器通过 POST /messages?sessionId=xxx 发消息
+服务端通过 sessionId 找到对应 SseEmitter
+服务端通过这条 SSE 连接把处理结果推回浏览器
+```
+
+这也是 MCP SSE 模式里常见的结构：
+
+```text
+GET /sse                         建立 SSE 连接，拿到 sessionId
+POST /messages?sessionId=xxx      客户端发送请求
+SSE message event                 服务端异步推送响应
 ```
