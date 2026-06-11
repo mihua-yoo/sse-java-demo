@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Streamable HTTP Demo</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      background: #f6f7f9;
+      color: #1f2937;
+    }
+    main {
+      max-width: 920px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    h1 {
+      font-size: 28px;
+      margin: 0 0 8px;
+    }
+    a {
+      color: #2563eb;
+    }
+    .status {
+      margin: 18px 0;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 132px;
+      box-sizing: border-box;
+      padding: 12px;
+      border: 1px solid #9ca3af;
+      border-radius: 6px;
+      background: #fff;
+      color: #111827;
+      font-family: Consolas, monospace;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    button {
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid #9ca3af;
+      border-radius: 6px;
+      background: #fff;
+      color: #111827;
+      cursor: pointer;
+    }
+    button:disabled {
+      color: #9ca3af;
+      cursor: not-allowed;
+      background: #f3f4f6;
+    }
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+    }
+    #log {
+      min-height: 380px;
+      padding: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #111827;
+      color: #d1fae5;
+      overflow: auto;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Streamable HTTP Demo</h1>
+    <div class="status">
+      对比页：<a href="/">HTTP with SSE 页面</a>。本页只围绕统一端点 <strong>/mcp</strong> 学习。
+      <br>
+      sessionId：<strong id="sessionId">无</strong>
+    </div>
+
+    <div class="toolbar">
+      <button id="initializeBtn" type="button">生成 initialize</button>
+      <button id="toolsListBtn" type="button">生成 tools/list</button>
+      <label><input id="streamMode" type="checkbox"> POST 响应用 SSE 流式返回</label>
+      <button id="postBtn" type="button">POST /mcp</button>
+      <button id="openStreamBtn" type="button">GET /mcp 通知流</button>
+      <button id="closeStreamBtn" type="button" disabled>关闭通知流</button>
+      <button id="clearBtn" type="button">清空日志</button>
+    </div>
+
+    <textarea id="requestBody"></textarea>
+    <pre id="log"></pre>
+  </main>
+
+  <script>
+    const sessionIdElement = document.getElementById("sessionId");
+    const initializeButton = document.getElementById("initializeBtn");
+    const toolsListButton = document.getElementById("toolsListBtn");
+    const postButton = document.getElementById("postBtn");
+    const openStreamButton = document.getElementById("openStreamBtn");
+    const closeStreamButton = document.getElementById("closeStreamBtn");
+    const clearButton = document.getElementById("clearBtn");
+    const streamMode = document.getElementById("streamMode");
+    const requestBody = document.getElementById("requestBody");
+    const logElement = document.getElementById("log");
+    let requestId = 1;
+    let sessionId = null;
+    let serverEventSource = null;
+
+    function appendLog(text) {
+      logElement.textContent += text + "\n";
+      logElement.scrollTop = logElement.scrollHeight;
+    }
+
+    function setSessionId(value) {
+      sessionId = value || sessionId;
+      sessionIdElement.textContent = sessionId || "无";
+    }
+
+    function fillRequest(method, params = {}) {
+      requestBody.value = JSON.stringify({
+        jsonrpc: "2.0",
+        id: String(requestId++),
+        method,
+        params
+      }, null, 2);
+    }
+
+    async function postMcp() {
+      let body;
+      try {
+        body = JSON.parse(requestBody.value);
+      } catch (error) {
+        appendLog("[warn] JSON 格式不正确：" + error.message);
+        return;
+      }
+
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": streamMode.checked ? "text/event-stream" : "application/json"
+      };
+      if (sessionId) {
+        headers["Mcp-Session-Id"] = sessionId;
+      }
+
+      appendLog("[post] POST /mcp Accept=" + headers.Accept + " body=" + JSON.stringify(body));
+
+      const response = await fetch("/mcp", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+
+      const responseSessionId = response.headers.get("Mcp-Session-Id");
+      if (responseSessionId) {
+        setSessionId(responseSessionId);
+        appendLog("[header] Mcp-Session-Id: " + responseSessionId);
+      }
+
+      const contentType = response.headers.get("Content-Type") || "";
+      if (contentType.includes("text/event-stream")) {
+        await readSseResponse(response);
+        return;
+      }
+
+      const result = await response.json();
+      appendLog("[json-response] " + JSON.stringify(result));
+    }
+
+    async function readSseResponse(response) {
+      appendLog("[stream] POST /mcp 返回 text/event-stream，开始读取响应流");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      while (true) {
+        const result = await reader.read();
+        if (result.done) {
+          appendLog("[stream] POST 响应流结束");
+          break;
+        }
+
+        const chunk = decoder.decode(result.value, { stream: true });
+        appendLog("[stream-chunk]\n" + chunk.trim());
+      }
+    }
+
+    function openServerEventStream() {
+      if (serverEventSource) {
+        appendLog("[info] GET /mcp 通知流已经打开");
+        return;
+      }
+
+      serverEventSource = new EventSource("/mcp");
+      openStreamButton.disabled = true;
+      closeStreamButton.disabled = false;
+      appendLog("[get] EventSource GET /mcp");
+
+      serverEventSource.onopen = () => appendLog("[get-open] GET /mcp 通知流已建立");
+      serverEventSource.addEventListener("message", event => appendLog("[get-message] " + event.data));
+      serverEventSource.onerror = () => appendLog("[get-error] GET /mcp 通知流异常或已结束");
+    }
+
+    function closeServerEventStream() {
+      if (!serverEventSource) {
+        return;
+      }
+
+      serverEventSource.close();
+      serverEventSource = null;
+      openStreamButton.disabled = false;
+      closeStreamButton.disabled = true;
+      appendLog("[get-close] 主动关闭 GET /mcp 通知流");
+    }
+
+    initializeButton.addEventListener("click", () => fillRequest("initialize"));
+    toolsListButton.addEventListener("click", () => fillRequest("tools/list"));
+    postButton.addEventListener("click", postMcp);
+    openStreamButton.addEventListener("click", openServerEventStream);
+    closeStreamButton.addEventListener("click", closeServerEventStream);
+    clearButton.addEventListener("click", () => logElement.textContent = "");
+
+    fillRequest("initialize");
+  </script>
+</body>
+</html>

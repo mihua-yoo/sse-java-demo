@@ -51,6 +51,13 @@ mvn spring-boot:run
 http://localhost:8089
 ```
 
+两个学习页面：
+
+```text
+http://localhost:8089/                 HTTP with SSE：/events + /messages
+http://localhost:8089/streamable.html  Streamable HTTP：统一 /mcp
+```
+
 ## 你会看到什么
 
 - 页面加载后不会自动连接，需要点击“连接”按钮才会创建 `EventSource("/events")`。
@@ -120,6 +127,55 @@ eventSource.addEventListener("message", (event) => {
 GET /sse                         建立 SSE 连接，拿到 sessionId
 POST /messages?sessionId=xxx      客户端发送请求
 SSE message event                 服务端异步推送响应
+```
+
+## Streamable HTTP 对比页
+
+访问：
+
+```text
+http://localhost:8089/streamable.html
+```
+
+这个页面使用统一端点：
+
+```text
+POST /mcp
+GET  /mcp
+```
+
+普通 JSON 响应：
+
+```text
+POST /mcp
+Accept: application/json
+Content-Type: application/json
+
+服务端直接返回 application/json
+```
+
+流式响应：
+
+```text
+POST /mcp
+Accept: text/event-stream
+Content-Type: application/json
+
+服务端把这一次 POST 响应变成 text/event-stream
+```
+
+服务端主动通知流：
+
+```text
+GET /mcp
+Accept: text/event-stream
+```
+
+对比重点：
+
+```text
+HTTP with SSE：先 GET /events 建立固定 SSE 通道，再 POST /messages 投递请求。
+Streamable HTTP：POST /mcp 自己就可以普通 JSON 返回，也可以流式 SSE 返回。
 ```
 
 阶段 4 的重点是理解“传输层”和“协议内容”的区别：
